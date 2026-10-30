@@ -1,0 +1,23 @@
+{
+  "name": "work-tracker-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Backend API server for Employee Management Portal Work Tracker with MongoDB Atlas",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "dev": "node --watch --env-file-if-exists=.env src/index.js",
+    "adduser": "node --env-file-if-exists=.env src/scripts/adduser.js",
+    "seed:admin": "node --env-file-if-exists=.env create-superadmin.js",
+    "migrate": "node --env-file-if-exists=.env src/scripts/migrate.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^9.11.4",
+    "node-cron": "^3.0.3"
+  }
+}
