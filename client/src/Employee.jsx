@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, downloadMyExcel, longDate, shortDate } from './api.js';
+import { api, downloadMyExcel, getCurrentWeekRange, longDate, shortDate } from './api.js';
 import { useToast } from './Toast.jsx';
 
 const chip = {
@@ -31,17 +31,18 @@ export default function Employee() {
   const [busyE, setBusyE] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Weekly plan state (Monday & Friday)
+  // Weekly plan state (Monday to any day of the week)
   const [weeklyWork, setWeeklyWork] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [targetStatus, setTargetStatus] = useState('Completed');
   const [targetReason, setTargetReason] = useState('');
   const [busyWeekly, setBusyWeekly] = useState(false);
+  const [isEditingWeekly, setIsEditingWeekly] = useState(false);
 
   // History state
   const [history, setHistory] = useState({ rows: [], counts: {} });
-  const [histFilter, setHistFilter] = useState({ from: '', to: '' });
+  const [histFilter, setHistFilter] = useState(() => getCurrentWeekRange());
   const [histLoading, setHistLoading] = useState(true);
   const [downloadingHist, setDownloadingHist] = useState(false);
 
@@ -172,6 +173,20 @@ export default function Employee() {
     }
   }
 
+  const startEditingWeeklyPlan = () => {
+    setWeeklyWork(data?.weeklyPlan?.weeklyWork || '');
+    setStartDate(data?.weeklyPlan?.startDate || data?.weekRange?.monday || '');
+    setEndDate(data?.weeklyPlan?.endDate || data?.weekRange?.friday || '');
+    setIsEditingWeekly(true);
+  };
+
+  const cancelEditingWeeklyPlan = () => {
+    setIsEditingWeekly(false);
+    setWeeklyWork(data?.weeklyPlan?.weeklyWork || '');
+    setStartDate(data?.weeklyPlan?.startDate || data?.weekRange?.monday || '');
+    setEndDate(data?.weeklyPlan?.endDate || data?.weekRange?.friday || '');
+  };
+
   async function handleSaveWeeklyPlan(e) {
     if (e) e.preventDefault();
     if (!weeklyWork.trim()) {
@@ -183,13 +198,21 @@ export default function Employee() {
       const res = await api('/weekly-plan', {
         method: 'POST',
         body: {
-          startDate: startDate || data.weekRange?.monday,
-          endDate: endDate || data.weekRange?.friday,
+          startDate: startDate || data?.weeklyPlan?.startDate || data?.weekRange?.monday,
+          endDate: endDate || data?.weeklyPlan?.endDate || data?.weekRange?.friday,
           weeklyWork: weeklyWork.trim(),
         },
       });
-      setData((prev) => ({ ...prev, weeklyPlan: res.weeklyPlan }));
-      toast.success('Weekly work plan saved successfully.');
+      setData((prev) => ({
+        ...prev,
+        weeklyPlan: {
+          ...prev?.weeklyPlan,
+          ...res.weeklyPlan,
+        },
+        weeklyWork: res.weeklyPlan?.weeklyWork || weeklyWork.trim(),
+      }));
+      setIsEditingWeekly(false);
+      toast.success('Weekly work plan updated successfully.');
       loadHistory();
     } catch (ex) {
       toast.error(ex.message);
@@ -305,6 +328,19 @@ export default function Employee() {
                   ✓ Plan Active
                 </span>
               )}
+              {!isEditingWeekly && (
+                <button
+                  type="button"
+                  onClick={startEditingWeeklyPlan}
+                  className="inline-flex items-center gap-1 rounded border border-brand/30 bg-brand/5 px-2.5 py-1 text-xs font-semibold text-brand hover:bg-brand/10 transition-colors cursor-pointer"
+                  title="Update your weekly plan"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                  {data.weeklyPlan?.weeklyWork ? 'Edit' : 'Add Plan'}
+                </button>
+              )}
             </div>
             {data.weeklyPlan?.targetStatus && data.weeklyPlan?.targetStatus !== 'Completed' && data.weeklyPlan?.targetStatusReason && (
               <span className="text-[11px] text-slate-500 italic max-w-xs text-right">
@@ -314,9 +350,20 @@ export default function Employee() {
           </div>
         </div>
 
-        {/* Monday: Planning Form; Other days: Display Planned Target */}
-        {data.isMonday ? (
-          <form onSubmit={handleSaveWeeklyPlan} className="mt-4 space-y-4">
+        {/* Weekly Plan: Can be updated on any day of the week */}
+        {isEditingWeekly ? (
+          <form onSubmit={handleSaveWeeklyPlan} className="mt-4 space-y-4 rounded-lg border border-brand/20 bg-brand/[0.02] p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  {data.weeklyPlan?.weeklyWork ? 'Edit Weekly Work Plan' : 'Add Weekly Work Plan'}
+                </h3>
+              </div>
+              <span className="rounded bg-brand/10 text-brand px-2 py-0.5 text-[11px] font-semibold">
+                Editing
+              </span>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700">
@@ -349,22 +396,31 @@ export default function Employee() {
                 Weekly Work / Target
                 <textarea
                   required
-                  rows={3}
+                  rows={4}
                   className="mt-1 w-full rounded border border-line bg-white p-3 text-xs focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
                   placeholder="Describe what you plan to accomplish this week…"
                   value={weeklyWork}
                   onChange={(e) => setWeeklyWork(e.target.value)}
+                  autoFocus
                 />
               </label>
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={cancelEditingWeeklyPlan}
+                disabled={busyWeekly}
+                className="rounded border border-line bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
               <button
                 type="submit"
                 disabled={busyWeekly || !weeklyWork.trim()}
-                className="rounded bg-brand px-5 py-2 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60 transition-colors"
+                className="rounded bg-brand px-5 py-2 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60 transition-colors cursor-pointer shadow-xs"
               >
-                {busyWeekly ? 'Saving Plan…' : 'Save Weekly Work Plan'}
+                {busyWeekly ? 'Updating Plan…' : 'Update Weekly Plan'}
               </button>
             </div>
           </form>
@@ -375,7 +431,7 @@ export default function Employee() {
             </span>
             <p className="mt-1.5 whitespace-pre-wrap text-slate-800 font-medium">
               {data.weeklyPlan?.weeklyWork || (
-                <span className="text-slate-400 italic">No weekly target was recorded on Monday.</span>
+                <span className="text-slate-400 italic">No weekly target recorded yet.</span>
               )}
             </p>
           </div>
@@ -705,10 +761,19 @@ export default function Employee() {
                 onChange={(e) => setHistFilter({ ...histFilter, to: e.target.value })}
               />
             </label>
+            <button
+              type="button"
+              onClick={() => setHistFilter(getCurrentWeekRange())}
+              className="text-brand font-medium hover:underline cursor-pointer"
+              title="Reset to current week"
+            >
+              This Week
+            </button>
             {(histFilter.from || histFilter.to) && (
               <button
+                type="button"
                 onClick={() => setHistFilter({ from: '', to: '' })}
-                className="text-brand underline hover:opacity-80"
+                className="text-slate-500 underline hover:opacity-80 cursor-pointer"
               >
                 Clear
               </button>

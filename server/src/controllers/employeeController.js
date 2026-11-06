@@ -78,9 +78,9 @@ export const getMyToday = async (req, res) => {
     evening: entry?.eveningUpdate || '',
     eveningUpdate: entry?.eveningUpdate || '',
     status: entry?.status || '',
-    weeklyWork: entry?.weeklyWork || weeklyPlan?.weeklyWork || '',
-    weeklyTargetStatus: entry?.weeklyTargetStatus || weeklyPlan?.targetStatus || '',
-    weeklyTargetReason: entry?.weeklyTargetReason || weeklyPlan?.targetStatusReason || '',
+    weeklyWork: weeklyPlan?.weeklyWork || entry?.weeklyWork || '',
+    weeklyTargetStatus: weeklyPlan?.targetStatus || entry?.weeklyTargetStatus || '',
+    weeklyTargetReason: weeklyPlan?.targetStatusReason || entry?.weeklyTargetReason || '',
     isWeeklyOff: isWeeklyOff(date),
   });
 };
@@ -316,17 +316,15 @@ export const saveWeeklyPlan = async (req, res) => {
   const user = await getEmployeeUser(req);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
+  const win = getWindowInfo();
   const { startDate, endDate, weeklyWork } = req.body || {};
   const text = String(weeklyWork || '').trim();
   if (!text) {
     return res.status(400).json({ error: 'Please enter your weekly work plan.' });
   }
-  if (!startDate || !endDate) {
-    return res.status(400).json({ error: 'Start date and end date are required.' });
-  }
 
-  const cleanStart = String(startDate).slice(0, 10);
-  const cleanEnd = String(endDate).slice(0, 10);
+  const cleanStart = String(startDate || win.weekRange.monday).slice(0, 10);
+  const cleanEnd = String(endDate || win.weekRange.friday).slice(0, 10);
 
   const plan = await WeeklyPlan.findOneAndUpdate(
     { userId: user._id, startDate: cleanStart },
@@ -343,11 +341,30 @@ export const saveWeeklyPlan = async (req, res) => {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   ).lean();
 
-  // Also reflect into Monday's update row if exists or on creation
+  // Reflect into Monday's update row if exists
   await Update.updateOne(
     { date: cleanStart, userId: user._id },
     { $set: { weeklyWork: text, employeeName: user.name } },
     { upsert: false }
+  );
+
+  // Reflect into current work date's update row if exists and falls within the week
+  if (win.workDate && win.workDate >= cleanStart && win.workDate <= cleanEnd && win.workDate !== cleanStart) {
+    await Update.updateOne(
+      { date: win.workDate, userId: user._id },
+      { $set: { weeklyWork: text, employeeName: user.name } },
+      { upsert: false }
+    );
+  }
+
+  // Also reflect into any existing update rows for this user in this week that already had weeklyWork
+  await Update.updateMany(
+    {
+      userId: user._id,
+      date: { $gte: cleanStart, $lte: cleanEnd },
+      weeklyWork: { $exists: true, $ne: '' },
+    },
+    { $set: { weeklyWork: text } }
   );
 
   res.json({
@@ -358,6 +375,7 @@ export const saveWeeklyPlan = async (req, res) => {
       endDate: plan.endDate,
       weeklyWork: plan.weeklyWork,
       targetStatus: plan.targetStatus || '',
+      targetStatusReason: plan.targetStatusReason || '',
       updatedAt: plan.updatedAtStr,
     },
   });
