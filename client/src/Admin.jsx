@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, downloadExcel, shortDate } from './api.js';
+import { api, downloadExcel, getCurrentWeekRange, shortDate } from './api.js';
 import { useToast } from './Toast.jsx';
 
 const chip = {
@@ -19,7 +19,10 @@ const targetStatusChip = {
 
 export default function Admin({ userRole }) {
   const { toast } = useToast();
-  const [f, setF] = useState({ from: '', to: '', name: '', status: '' });
+  const [f, setF] = useState(() => {
+    const range = getCurrentWeekRange();
+    return { from: range.from, to: range.to, name: '', status: '' };
+  });
   const [data, setData] = useState({ rows: [], counts: {}, employees: [] });
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
@@ -220,8 +223,19 @@ export default function Admin({ userRole }) {
           </select>
         </label>
         <button
+          type="button"
+          onClick={() => {
+            const range = getCurrentWeekRange();
+            setF((prev) => ({ ...prev, from: range.from, to: range.to }));
+          }}
+          className="px-3 py-1.5 text-xs text-brand font-medium hover:underline self-end cursor-pointer"
+        >
+          This Week
+        </button>
+        <button
+          type="button"
           onClick={() => setF({ from: '', to: '', name: '', status: '' })}
-          className="px-3 py-1.5 text-xs text-brand font-medium hover:underline self-end"
+          className="px-3 py-1.5 text-xs text-slate-500 font-medium hover:underline self-end cursor-pointer"
         >
           Clear filters
         </button>

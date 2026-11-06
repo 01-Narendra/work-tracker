@@ -119,3 +119,52 @@ export const shortDate = (d) => {
     year: 'numeric',
   });
 };
+
+export function getCurrentWeekRange() {
+  const now = new Date();
+  let year, month, day, hour = 12;
+  try {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    });
+    const p = {};
+    fmt.formatToParts(now).forEach((x) => (p[x.type] = x.value));
+    year = Number(p.year);
+    month = Number(p.month);
+    day = Number(p.day);
+    hour = Number(p.hour || 12);
+  } catch {
+    year = now.getFullYear();
+    month = now.getMonth() + 1;
+    day = now.getDate();
+    hour = now.getHours();
+  }
+
+  // Work day before 9:00 AM refers to previous work day
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  if (hour < 9) {
+    dt.setUTCDate(dt.getUTCDate() - 1);
+  }
+
+  const dow = dt.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  const diffToMonday = dow === 0 ? -6 : 1 - dow;
+
+  const mon = new Date(dt);
+  mon.setUTCDate(dt.getUTCDate() + diffToMonday);
+
+  const fri = new Date(mon);
+  fri.setUTCDate(mon.getUTCDate() + 4);
+
+  const format = (d) => d.toISOString().slice(0, 10);
+
+  return {
+    from: format(mon),
+    to: format(fri),
+  };
+}
