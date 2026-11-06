@@ -31,6 +31,25 @@ export async function api(path, opts) {
   return data;
 }
 
+export async function toggleCurrentWeekUpdates(allowed) {
+  const body = allowed !== undefined ? { allowed: Boolean(allowed) } : {};
+  return api('/superadmin/toggle-current-week-updates', {
+    method: 'POST',
+    body,
+  });
+}
+
+export async function getSystemSettings() {
+  return api('/superadmin/system-settings');
+}
+
+export async function updateDay(dayData) {
+  return api('/update-day', {
+    method: 'POST',
+    body: dayData,
+  });
+}
+
 export async function downloadExcel(filters = {}, filename = 'work_updates.xlsx') {
   let url = '/admin/download';
   let targetFilename = filename;

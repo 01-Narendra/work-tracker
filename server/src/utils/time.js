@@ -256,22 +256,88 @@ export function getWindowInfo(now = new Date()) {
   };
 }
 
-export function validateCheckInTime(timeString, now = new Date()) {
-  const win = getWindowInfo(now);
-  if (!win.morningWindow.open) {
-    throw new Error('Morning window closed. Check-in is only allowed between 9:00 AM and 1:00 PM.');
+export function isDateInCurrentWeek(dateStr, now = new Date()) {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  const clean = dateStr.slice(0, 10);
+  const workDate = currentWorkDate(now);
+  const weekRange = getWeekRange(workDate);
+  const monday = weekRange.monday;
+  const sunday = addDays(monday, 6);
+  // Current week only: Monday through Sunday of current week, but not future dates beyond workDate
+  return clean >= monday && clean <= sunday && clean <= workDate;
+}
+
+export function getCurrentWeekDays(now = new Date()) {
+  const workDate = currentWorkDate(now);
+  const weekRange = getWeekRange(workDate);
+  const days = [];
+  // Monday through Friday of the work week
+  for (let i = 0; i < 5; i++) {
+    const d = addDays(weekRange.monday, i);
+    const dow = getDayOfWeek(d);
+    days.push({
+      date: d,
+      dayOfWeek: dow,
+      dayName: getDayName(dow),
+      isToday: d === workDate,
+      isPast: d < workDate,
+      isFuture: d > workDate,
+    });
   }
-  if (!ALL_CHECK_IN_SLOTS.includes(timeString)) {
-    throw new Error('Invalid check-in time. Please select a valid option from the morning window (9:00 AM to 1:00 PM).');
+  // If workDate is Saturday or Sunday, also include those:
+  const workDow = getDayOfWeek(workDate);
+  if (workDow === 6 || workDow === 0) {
+    if (!days.find((d) => d.date === workDate)) {
+      days.push({
+        date: workDate,
+        dayOfWeek: workDow,
+        dayName: getDayName(workDow),
+        isToday: true,
+        isPast: false,
+        isFuture: false,
+      });
+    }
+  }
+  return {
+    monday: weekRange.monday,
+    friday: weekRange.friday,
+    workDate,
+    days,
+  };
+}
+
+export function validateCheckInTime(timeString, now = new Date(), options = {}) {
+  const { bypassWindow = false } = options;
+  const win = getWindowInfo(now);
+  if (!bypassWindow) {
+    if (!win.morningWindow.open) {
+      throw new Error('Morning window closed. Check-in is only allowed between 9:00 AM and 1:00 PM.');
+    }
+    if (!ALL_CHECK_IN_SLOTS.includes(timeString)) {
+      throw new Error('Invalid check-in time. Please select a valid option from the morning window (9:00 AM to 1:00 PM).');
+    }
+  } else {
+    // In grace mode: allow any valid work time slot
+    if (!ALL_CHECK_IN_SLOTS.includes(timeString) && !ALL_CHECK_OUT_SLOTS.includes(timeString)) {
+      throw new Error('Invalid check-in time. Please select a valid time slot.');
+    }
   }
 }
 
-export function validateCheckOutTime(timeString, now = new Date()) {
+export function validateCheckOutTime(timeString, now = new Date(), options = {}) {
+  const { bypassWindow = false } = options;
   const win = getWindowInfo(now);
-  if (!win.eveningWindow.open) {
-    throw new Error('Evening window closed. Check-out is only allowed between 1:00 PM and 11:55 PM.');
-  }
-  if (!ALL_CHECK_OUT_SLOTS.includes(timeString)) {
-    throw new Error('Invalid check-out time. Please select a valid option from the evening window (1:00 PM to 11:55 PM).');
+  if (!bypassWindow) {
+    if (!win.eveningWindow.open) {
+      throw new Error('Evening window closed. Check-out is only allowed between 1:00 PM and 11:55 PM.');
+    }
+    if (!ALL_CHECK_OUT_SLOTS.includes(timeString)) {
+      throw new Error('Invalid check-out time. Please select a valid option from the evening window (1:00 PM to 11:55 PM).');
+    }
+  } else {
+    // In grace mode: allow any valid work time slot
+    if (!ALL_CHECK_OUT_SLOTS.includes(timeString) && !ALL_CHECK_IN_SLOTS.includes(timeString)) {
+      throw new Error('Invalid check-out time. Please select a valid time slot.');
+    }
   }
 }

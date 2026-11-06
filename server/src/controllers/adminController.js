@@ -8,6 +8,10 @@ import {
   resetUserPassword,
   updateUserDetails,
 } from '../services/userService.js';
+import {
+  isCurrentWeekUpdatesAllowed,
+  setCurrentWeekUpdatesAllowed,
+} from '../services/settingService.js';
 
 /**
  * Returns visible users and their IDs based on the caller's role.
@@ -134,7 +138,9 @@ export const getUpdates = async (req, res) => {
     weeklyTargetReason: r.weeklyTargetReason || '',
   }));
 
-  res.json({ rows, counts, employees });
+  const allowCurrentWeekUpdates = await isCurrentWeekUpdatesAllowed();
+
+  res.json({ rows, counts, employees, allowCurrentWeekUpdates });
 };
 
 export const downloadExcel = async (req, res) => {
@@ -222,4 +228,23 @@ export const updateUser = async (req, res) => {
   } catch (err) {
     res.status(err.message === 'User not found.' ? 404 : 400).json({ error: err.message });
   }
+};
+
+export const getSystemSettings = async (_req, res) => {
+  const allowCurrentWeekUpdates = await isCurrentWeekUpdatesAllowed();
+  res.json({ allowCurrentWeekUpdates });
+};
+
+export const toggleCurrentWeekUpdates = async (req, res) => {
+  const current = await isCurrentWeekUpdatesAllowed();
+  const nextVal = req.body?.allowed !== undefined ? Boolean(req.body.allowed) : !current;
+  const updated = await setCurrentWeekUpdatesAllowed(nextVal, req.user?.username || 'superadmin');
+
+  res.json({
+    ok: true,
+    allowCurrentWeekUpdates: updated,
+    message: updated
+      ? 'Current week updates enabled. Employees and Admins can now add or update their check-in, check-out, and updates for any day of the current week.'
+      : 'Current week updates disabled. Morning (9:00 AM - 1:00 PM) and evening (1:00 PM - 11:55 PM) window restrictions restored.',
+  });
 };

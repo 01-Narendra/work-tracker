@@ -17,13 +17,45 @@ const targetStatusChip = {
   'Not Completed': 'bg-red-100 text-red-800 border-red-200',
 };
 
+function getFallbackWeekDays(d) {
+  if (d?.currentWeekDays && d.currentWeekDays.length > 0) {
+    return d.currentWeekDays;
+  }
+  const mondayStr = d?.weekRange?.monday || d?.weeklyPlan?.startDate;
+  if (!mondayStr) return [];
+  const days = [];
+  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const workDate = d?.workDate || d?.date || '';
+  for (let i = 0; i < 5; i++) {
+    const dt = new Date(mondayStr + 'T00:00:00Z');
+    dt.setUTCDate(dt.getUTCDate() + i);
+    const dateStr = dt.toISOString().slice(0, 10);
+    days.push({
+      date: dateStr,
+      dayOfWeek: i + 1,
+      dayName: dayNames[i],
+      isToday: dateStr === workDate,
+      isPast: dateStr < workDate,
+      isFuture: dateStr > workDate,
+      status: dateStr === d?.date ? d?.status || 'Not Filled' : 'Not Filled',
+      checkIn: dateStr === d?.date ? d?.checkIn || '' : '',
+      checkOut: dateStr === d?.date ? d?.checkOut || '' : '',
+      hoursWorked: dateStr === d?.date ? d?.hoursWorked || '' : '',
+    });
+  }
+  return days;
+}
+
 export default function Employee() {
   const { toast } = useToast();
   const [data, setData] = useState(null);
+  const [selectedDate, setSelectedDate] = useState('');
   const [m, setM] = useState('');
   const [e, setE] = useState('');
   const [selectedIn, setSelectedIn] = useState('');
   const [selectedOut, setSelectedOut] = useState('');
+  const [isEditingIn, setIsEditingIn] = useState(false);
+  const [isEditingOut, setIsEditingOut] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [busyIn, setBusyIn] = useState(false);
   const [busyOut, setBusyOut] = useState(false);
@@ -46,34 +78,52 @@ export default function Employee() {
   const [histLoading, setHistLoading] = useState(true);
   const [downloadingHist, setDownloadingHist] = useState(false);
 
-  const loadToday = useCallback(() => {
-    setLoading(true);
-    setLoadError('');
-    api('/my-today')
-      .then((d) => {
-        setData(d);
-        setM(d.morning || '');
-        setE(d.evening || '');
-        if (d.defaultCheckIn && !d.checkIn) setSelectedIn(d.defaultCheckIn);
-        if (d.defaultCheckOut && !d.checkOut) setSelectedOut(d.defaultCheckOut);
+  const loadDay = useCallback(
+    (targetDate) => {
+      setLoading(true);
+      setLoadError('');
+      const dateToFetch = targetDate !== undefined ? targetDate : selectedDate;
+      const url = dateToFetch ? `/my-today?date=${dateToFetch}` : '/my-today';
+      api(url)
+        .then((d) => {
+          setData((prev) => ({
+            ...prev,
+            ...d,
+            currentWeekDays: (d?.currentWeekDays && d.currentWeekDays.length > 0)
+              ? d.currentWeekDays
+              : (prev?.currentWeekDays || []),
+          }));
+          setSelectedDate(d.date);
+          setM(d.morning || '');
+          setE(d.evening || '');
+          setSelectedIn(d.checkIn || d.defaultCheckIn || '');
+          setSelectedOut(d.checkOut || d.defaultCheckOut || '');
+          setIsEditingIn(false);
+          setIsEditingOut(false);
 
-        // Weekly plan population
-        if (d.weeklyPlan) {
-          setWeeklyWork(d.weeklyPlan.weeklyWork || '');
-          setStartDate(d.weeklyPlan.startDate || d.weekRange?.monday || '');
-          setEndDate(d.weeklyPlan.endDate || d.weekRange?.friday || '');
-          if (d.weeklyPlan.targetStatus) {
-            setTargetStatus(d.weeklyPlan.targetStatus);
+          // Weekly plan population
+          if (d.weeklyPlan) {
+            setWeeklyWork(d.weeklyPlan.weeklyWork || '');
+            setStartDate(d.weeklyPlan.startDate || d.weekRange?.monday || '');
+            setEndDate(d.weeklyPlan.endDate || d.weekRange?.friday || '');
+            if (d.weeklyPlan.targetStatus) {
+              setTargetStatus(d.weeklyPlan.targetStatus);
+            }
+            setTargetReason(d.weeklyPlan.targetStatusReason || d.weeklyTargetReason || '');
           }
-          setTargetReason(d.weeklyPlan.targetStatusReason || d.weeklyTargetReason || '');
-        }
-      })
-      .catch((ex) => {
-        setLoadError(ex.message);
-        toast.error(ex.message);
-      })
-      .finally(() => setLoading(false));
-  }, [toast]);
+        })
+        .catch((ex) => {
+          setLoadError(ex.message);
+          toast.error(ex.message);
+        })
+        .finally(() => setLoading(false));
+    },
+    [toast, selectedDate]
+  );
+
+  const loadToday = useCallback(() => {
+    loadDay(selectedDate || data?.date || '');
+  }, [loadDay, selectedDate, data?.date]);
 
   const loadHistory = useCallback(() => {
     setHistLoading(true);
@@ -86,8 +136,8 @@ export default function Employee() {
   }, [histFilter]);
 
   useEffect(() => {
-    loadToday();
-  }, [loadToday]);
+    loadDay('');
+  }, []);
 
   useEffect(() => {
     loadHistory();
@@ -96,14 +146,25 @@ export default function Employee() {
   async function handleCheckIn() {
     const timeToSubmit = selectedIn || data?.defaultCheckIn;
     if (!timeToSubmit) return;
+    const currentDate = selectedDate || data?.date;
     setBusyIn(true);
     try {
       const res = await api('/check-in', {
         method: 'POST',
-        body: { time: timeToSubmit },
+        body: { time: timeToSubmit, date: currentDate },
       });
-      setData((prev) => ({ ...prev, ...res }));
-      toast.success(`Checked in at ${timeToSubmit}`);
+      const updatedDate = res.date || currentDate;
+      setData((prev) => ({
+        ...prev,
+        ...res,
+        currentWeekDays: (res?.currentWeekDays && res.currentWeekDays.length > 0)
+          ? res.currentWeekDays
+          : (prev?.currentWeekDays || []),
+      }));
+      setSelectedDate(updatedDate);
+      setIsEditingIn(false);
+      toast.success(`Check-in recorded at ${timeToSubmit} for ${shortDate(updatedDate)}`);
+      loadDay(updatedDate);
       loadHistory();
     } catch (ex) {
       toast.error(ex.message);
@@ -115,14 +176,25 @@ export default function Employee() {
   async function handleCheckOut() {
     const timeToSubmit = selectedOut || data?.defaultCheckOut;
     if (!timeToSubmit) return;
+    const currentDate = selectedDate || data?.date;
     setBusyOut(true);
     try {
       const res = await api('/check-out', {
         method: 'POST',
-        body: { time: timeToSubmit },
+        body: { time: timeToSubmit, date: currentDate },
       });
-      setData((prev) => ({ ...prev, ...res }));
-      toast.success(`Checked out at ${timeToSubmit}`);
+      const updatedDate = res.date || currentDate;
+      setData((prev) => ({
+        ...prev,
+        ...res,
+        currentWeekDays: (res?.currentWeekDays && res.currentWeekDays.length > 0)
+          ? res.currentWeekDays
+          : (prev?.currentWeekDays || []),
+      }));
+      setSelectedDate(updatedDate);
+      setIsEditingOut(false);
+      toast.success(`Check-out recorded at ${timeToSubmit} for ${shortDate(updatedDate)}`);
+      loadDay(updatedDate);
       loadHistory();
     } catch (ex) {
       toast.error(ex.message);
@@ -136,14 +208,25 @@ export default function Employee() {
       toast.error('Morning update cannot be empty.');
       return;
     }
+    const currentDate = selectedDate || data?.date;
     setBusyM(true);
     try {
       const res = await api('/update', {
         method: 'POST',
-        body: { type: 'morning', text: m.trim() },
+        body: { type: 'morning', text: m.trim(), date: currentDate },
       });
-      setData((prev) => ({ ...prev, ...res }));
-      toast.success('Morning update saved successfully.');
+      const updatedDate = res.date || currentDate;
+      setData((prev) => ({
+        ...prev,
+        ...res,
+        currentWeekDays: (res?.currentWeekDays && res.currentWeekDays.length > 0)
+          ? res.currentWeekDays
+          : (prev?.currentWeekDays || []),
+      }));
+      setSelectedDate(updatedDate);
+      setM(res.morning || m.trim());
+      toast.success(`Morning update saved for ${shortDate(updatedDate)}.`);
+      loadDay(updatedDate);
       loadHistory();
     } catch (ex) {
       toast.error(ex.message);
@@ -157,14 +240,25 @@ export default function Employee() {
       toast.error('Evening update cannot be empty.');
       return;
     }
+    const currentDate = selectedDate || data?.date;
     setBusyE(true);
     try {
       const res = await api('/update', {
         method: 'POST',
-        body: { type: 'evening', text: e.trim() },
+        body: { type: 'evening', text: e.trim(), date: currentDate },
       });
-      setData((prev) => ({ ...prev, ...res }));
-      toast.success('Evening update saved successfully.');
+      const updatedDate = res.date || currentDate;
+      setData((prev) => ({
+        ...prev,
+        ...res,
+        currentWeekDays: (res?.currentWeekDays && res.currentWeekDays.length > 0)
+          ? res.currentWeekDays
+          : (prev?.currentWeekDays || []),
+      }));
+      setSelectedDate(updatedDate);
+      setE(res.evening || e.trim());
+      toast.success(`Evening update saved for ${shortDate(updatedDate)}.`);
+      loadDay(updatedDate);
       loadHistory();
     } catch (ex) {
       toast.error(ex.message);
@@ -210,9 +304,11 @@ export default function Employee() {
           ...res.weeklyPlan,
         },
         weeklyWork: res.weeklyPlan?.weeklyWork || weeklyWork.trim(),
+        currentWeekDays: prev?.currentWeekDays || [],
       }));
       setIsEditingWeekly(false);
       toast.success('Weekly work plan updated successfully.');
+      loadDay(selectedDate || data?.date);
       loadHistory();
     } catch (ex) {
       toast.error(ex.message);
@@ -235,8 +331,13 @@ export default function Employee() {
           reason: targetStatus !== 'Completed' ? targetReason.trim() : '',
         },
       });
-      setData((prev) => ({ ...prev, weeklyPlan: res.weeklyPlan }));
+      setData((prev) => ({
+        ...prev,
+        weeklyPlan: res.weeklyPlan,
+        currentWeekDays: prev?.currentWeekDays || [],
+      }));
       toast.success(`Weekly target marked as "${targetStatus}".`);
+      loadDay(selectedDate || data?.date);
       loadHistory();
     } catch (ex) {
       toast.error(ex.message);
@@ -281,6 +382,10 @@ export default function Employee() {
 
   const morningOpen = data.morningWindow?.open;
   const eveningOpen = data.eveningWindow?.open;
+  const weekDays =
+    data.currentWeekDays && data.currentWeekDays.length > 0
+      ? data.currentWeekDays
+      : getFallbackWeekDays(data);
 
   const boxClass =
     'mt-2 h-28 w-full resize-y rounded border border-line bg-white p-3 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:bg-slate-50 disabled:text-slate-400';
@@ -511,15 +616,48 @@ export default function Employee() {
         </div>
       </div>
 
-      {/* TODAY'S CARD */}
+      {/* SUPER ADMIN GRACE PERIOD NOTICE BANNER */}
+      {data.allowCurrentWeekUpdates && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50/90 p-4 shadow-xs text-amber-900">
+          <div className="flex items-start gap-3">
+            <span className="text-xl">🔓</span>
+            <div className="flex-1 text-xs">
+              <h3 className="font-bold text-sm text-amber-950">
+                Current Week Updates Enabled by Super Admin
+              </h3>
+              <p className="mt-0.5 leading-relaxed text-amber-900/90">
+                If you forgot to check in, check out, or submit work updates, you can now add or update
+                your records for any day of the current week (from{' '}
+                <strong>{shortDate(data.weekRange?.monday)}</strong> to{' '}
+                <strong>{shortDate(data.workDate)}</strong>), outside standard morning and evening windows.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WORK UPDATES CARD */}
       <div className="rounded-xl border border-line bg-white p-6 shadow-xs">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line pb-4">
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl font-bold tracking-tight text-ink">{longDate(data.date)}</h1>
               {data.status && (
-                <span className={`rounded px-2.5 py-0.5 text-xs font-semibold ${chip[data.status] || 'bg-slate-100 text-slate-800'}`}>
+                <span
+                  className={`rounded px-2.5 py-0.5 text-xs font-semibold ${
+                    chip[data.status] || 'bg-slate-100 text-slate-800'
+                  }`}
+                >
                   {data.status}
+                </span>
+              )}
+              {data.isTargetToday ? (
+                <span className="rounded bg-brand/10 text-brand px-2 py-0.5 text-xs font-semibold">
+                  Today
+                </span>
+              ) : (
+                <span className="rounded bg-amber-100 text-amber-800 px-2 py-0.5 text-xs font-semibold">
+                  Past Day (Current Week)
                 </span>
               )}
               {data.isWeeklyOff && (
@@ -530,24 +668,116 @@ export default function Employee() {
             </div>
             <p className="mt-1 text-xs text-slate-500">
               {data.hoursWorked && (
-                <span className="ml-2 font-semibold text-brand">
-                  Total: {data.hoursWorked} worked
-                </span>
+                <span className="font-semibold text-brand">Total: {data.hoursWorked} worked</span>
               )}
             </p>
           </div>
-          <button
-            onClick={loadToday}
-            className="rounded border border-line px-3 py-1 text-xs font-medium text-slate-600 hover:bg-paper"
-          >
-            Refresh status
-          </button>
+          <div className="flex items-center gap-2">
+            {!data.isTargetToday && (
+              <button
+                type="button"
+                onClick={() => loadDay(data.workDate)}
+                className="rounded border border-brand/30 bg-brand/5 px-3 py-1 text-xs font-medium text-brand hover:bg-brand/10 cursor-pointer"
+              >
+                Go to Today
+              </button>
+            )}
+            <button
+              onClick={() => loadDay(data.date)}
+              className="rounded border border-line px-3 py-1 text-xs font-medium text-slate-600 hover:bg-paper cursor-pointer"
+            >
+              Refresh status
+            </button>
+          </div>
         </div>
+
+        {/* Current Week Day Switcher */}
+        {weekDays && weekDays.length > 0 && (
+          <div className="mt-4 pt-2 pb-1">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Select Day of Current Week
+              </span>
+              {data.allowCurrentWeekUpdates ? (
+                <span className="text-[11px] font-medium text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
+                  ✓ Grace Mode Active: Click any past day to view/update
+                </span>
+              ) : (
+                <span className="text-[11px] text-slate-400">
+                  Strict Mode: Only today is editable
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {weekDays.map((d) => {
+                const isSelected = d.date === data.date;
+                const canClick = data.allowCurrentWeekUpdates ? !d.isFuture : d.isToday;
+                return (
+                  <button
+                    key={d.date}
+                    type="button"
+                    disabled={!canClick}
+                    onClick={() => loadDay(d.date)}
+                    className={`flex flex-col items-start p-2.5 rounded-lg border text-left transition-all ${
+                      isSelected
+                        ? 'border-brand bg-brand/5 ring-2 ring-brand/30 shadow-xs'
+                        : canClick
+                        ? 'border-line bg-white hover:bg-slate-50 cursor-pointer'
+                        : 'border-line/60 bg-slate-50/70 opacity-50 cursor-not-allowed'
+                    }`}
+                    title={
+                      !canClick
+                        ? d.isFuture
+                          ? 'Future date'
+                          : 'Only today is editable unless Super Admin enables current week updates'
+                        : `Switch to ${d.dayName} (${shortDate(d.date)})`
+                    }
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className={`text-xs font-bold ${isSelected ? 'text-brand' : 'text-slate-700'}`}>
+                        {d.dayName}
+                      </span>
+                      {d.isToday && (
+                        <span className="text-[10px] font-semibold text-brand bg-brand/10 px-1.5 py-0.2 rounded">
+                          Today
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-mono text-slate-500 mt-0.5">
+                      {shortDate(d.date)}
+                    </span>
+                    <div className="mt-2 flex items-center justify-between w-full">
+                      <span
+                        className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                          chip[d.status] || 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {d.status}
+                      </span>
+                      {d.hoursWorked && (
+                        <span className="text-[10px] font-medium text-slate-600">
+                          {d.hoursWorked}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Windows & Actions Grid */}
         <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
           {/* MORNING SECTION */}
-          <div className={`rounded-lg border p-4 transition-colors ${morningOpen ? 'border-brand/40 bg-brand/5' : 'border-line bg-paper/50'}`}>
+          <div
+            className={`rounded-lg border p-4 transition-colors ${
+              morningOpen || data.allowCurrentWeekUpdates
+                ? 'border-brand/40 bg-brand/5'
+                : 'border-line bg-paper/50'
+            }`}
+          >
             <div className="flex items-center justify-between border-b border-line/60 pb-3">
               <div>
                 <h2 className="font-semibold text-ink">Morning Window</h2>
@@ -555,10 +785,18 @@ export default function Employee() {
               </div>
               <span
                 className={`rounded px-2 py-0.5 text-xs font-medium ${
-                  morningOpen ? 'bg-green-100 text-green-800' : 'bg-slate-200 text-slate-700'
+                  data.allowCurrentWeekUpdates
+                    ? 'bg-amber-100 text-amber-800'
+                    : morningOpen
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-slate-200 text-slate-700'
                 }`}
               >
-                {morningOpen ? 'Open Now' : 'Closed'}
+                {data.allowCurrentWeekUpdates
+                  ? 'Open (Grace Mode)'
+                  : morningOpen
+                  ? 'Open Now'
+                  : 'Closed'}
               </span>
             </div>
 
@@ -567,13 +805,31 @@ export default function Employee() {
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
                 Check-In Time
               </label>
-              {data.checkIn ? (
-                <div className="mt-1.5 flex items-center gap-2 text-sm font-medium text-green-800 bg-green-50 p-2.5 rounded border border-green-200">
-                  <span>✓</span>
-                  <span>Checked in at <strong>{data.checkIn}</strong></span>
+
+              {data.checkIn && !isEditingIn ? (
+                <div className="mt-1.5 flex items-center justify-between text-sm font-medium text-green-800 bg-green-50 p-2.5 rounded border border-green-200">
+                  <div className="flex items-center gap-2">
+                    <span>✓</span>
+                    <span>
+                      Checked in at <strong>{data.checkIn}</strong>
+                    </span>
+                  </div>
+                  {data.allowCurrentWeekUpdates && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedIn(data.checkIn);
+                        setIsEditingIn(true);
+                      }}
+                      className="text-xs font-semibold text-brand underline hover:opacity-85 cursor-pointer ml-2"
+                      title="Update check-in time"
+                    >
+                      Change time
+                    </button>
+                  )}
                 </div>
-              ) : morningOpen ? (
-                <div className="mt-1.5 flex gap-2">
+              ) : morningOpen || data.allowCurrentWeekUpdates ? (
+                <div className="mt-1.5 flex flex-wrap gap-2">
                   <select
                     className="flex-1 rounded border border-line bg-white px-3 py-1.5 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
                     value={selectedIn || data.defaultCheckIn}
@@ -588,10 +844,19 @@ export default function Employee() {
                   <button
                     onClick={handleCheckIn}
                     disabled={busyIn || !(selectedIn || data.defaultCheckIn)}
-                    className="rounded bg-brand px-3.5 py-1.5 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                    className="rounded bg-brand px-3.5 py-1.5 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60 cursor-pointer"
                   >
-                    {busyIn ? 'Saving…' : 'Confirm check-in'}
+                    {busyIn ? 'Saving…' : data.checkIn ? 'Update check-in' : 'Confirm check-in'}
                   </button>
+                  {isEditingIn && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingIn(false)}
+                      className="rounded border border-line px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
               ) : (
                 <p className="mt-1.5 text-xs text-slate-500 italic bg-slate-100 p-2 rounded">
@@ -603,16 +868,23 @@ export default function Employee() {
             {/* Morning Update Box */}
             <div className="mt-5">
               <div className="flex items-center justify-between">
-                <label htmlFor="morning-text" className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                <label
+                  htmlFor="morning-text"
+                  className="text-xs font-semibold text-slate-700 uppercase tracking-wider"
+                >
                   Morning Update
                 </label>
                 <span className="text-xs text-slate-400">{m.length} / 2000</span>
               </div>
               <textarea
                 id="morning-text"
-                disabled={!morningOpen}
+                disabled={!morningOpen && !data.allowCurrentWeekUpdates}
                 className={boxClass}
-                placeholder={morningOpen ? 'What will you work on today?' : 'Morning updates open 9:00 AM to 1:00 PM.'}
+                placeholder={
+                  morningOpen || data.allowCurrentWeekUpdates
+                    ? 'What will you work on today?'
+                    : 'Morning updates open 9:00 AM to 1:00 PM.'
+                }
                 value={m}
                 maxLength={2000}
                 onChange={(e) => setM(e.target.value)}
@@ -620,17 +892,25 @@ export default function Employee() {
               <div className="mt-2 flex justify-end">
                 <button
                   onClick={handleSaveMorning}
-                  disabled={!morningOpen || busyM || !m.trim()}
-                  className="rounded bg-brand px-4 py-1.5 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+                  disabled={
+                    (!morningOpen && !data.allowCurrentWeekUpdates) || busyM || !m.trim()
+                  }
+                  className="rounded bg-brand px-4 py-1.5 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-50 cursor-pointer"
                 >
-                  {busyM ? 'Saving…' : 'Save morning update'}
+                  {busyM ? 'Saving…' : data.morning ? 'Update morning update' : 'Save morning update'}
                 </button>
               </div>
             </div>
           </div>
 
           {/* EVENING SECTION */}
-          <div className={`rounded-lg border p-4 transition-colors ${eveningOpen ? 'border-brand/40 bg-brand/5' : 'border-line bg-paper/50'}`}>
+          <div
+            className={`rounded-lg border p-4 transition-colors ${
+              eveningOpen || data.allowCurrentWeekUpdates
+                ? 'border-brand/40 bg-brand/5'
+                : 'border-line bg-paper/50'
+            }`}
+          >
             <div className="flex items-center justify-between border-b border-line/60 pb-3">
               <div>
                 <h2 className="font-semibold text-ink">Evening Window</h2>
@@ -638,10 +918,18 @@ export default function Employee() {
               </div>
               <span
                 className={`rounded px-2 py-0.5 text-xs font-medium ${
-                  eveningOpen ? 'bg-green-100 text-green-800' : 'bg-slate-200 text-slate-700'
+                  data.allowCurrentWeekUpdates
+                    ? 'bg-amber-100 text-amber-800'
+                    : eveningOpen
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-slate-200 text-slate-700'
                 }`}
               >
-                {eveningOpen ? 'Open Now' : 'Closed'}
+                {data.allowCurrentWeekUpdates
+                  ? 'Open (Grace Mode)'
+                  : eveningOpen
+                  ? 'Open Now'
+                  : 'Closed'}
               </span>
             </div>
 
@@ -650,13 +938,31 @@ export default function Employee() {
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
                 Check-Out Time
               </label>
-              {data.checkOut ? (
-                <div className="mt-1.5 flex items-center gap-2 text-sm font-medium text-green-800 bg-green-50 p-2.5 rounded border border-green-200">
-                  <span>✓</span>
-                  <span>Checked out at <strong>{data.checkOut}</strong></span>
+
+              {data.checkOut && !isEditingOut ? (
+                <div className="mt-1.5 flex items-center justify-between text-sm font-medium text-green-800 bg-green-50 p-2.5 rounded border border-green-200">
+                  <div className="flex items-center gap-2">
+                    <span>✓</span>
+                    <span>
+                      Checked out at <strong>{data.checkOut}</strong>
+                    </span>
+                  </div>
+                  {data.allowCurrentWeekUpdates && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOut(data.checkOut);
+                        setIsEditingOut(true);
+                      }}
+                      className="text-xs font-semibold text-brand underline hover:opacity-85 cursor-pointer ml-2"
+                      title="Update check-out time"
+                    >
+                      Change time
+                    </button>
+                  )}
                 </div>
-              ) : eveningOpen ? (
-                <div className="mt-1.5 flex gap-2">
+              ) : eveningOpen || data.allowCurrentWeekUpdates ? (
+                <div className="mt-1.5 flex flex-wrap gap-2">
                   <select
                     className="flex-1 rounded border border-line bg-white px-3 py-1.5 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
                     value={selectedOut || data.defaultCheckOut}
@@ -671,10 +977,19 @@ export default function Employee() {
                   <button
                     onClick={handleCheckOut}
                     disabled={busyOut || !(selectedOut || data.defaultCheckOut)}
-                    className="rounded bg-brand px-3.5 py-1.5 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+                    className="rounded bg-brand px-3.5 py-1.5 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60 cursor-pointer"
                   >
-                    {busyOut ? 'Saving…' : 'Confirm check-out'}
+                    {busyOut ? 'Saving…' : data.checkOut ? 'Update check-out' : 'Confirm check-out'}
                   </button>
+                  {isEditingOut && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingOut(false)}
+                      className="rounded border border-line px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
               ) : (
                 <p className="mt-1.5 text-xs text-slate-500 italic bg-slate-100 p-2 rounded">
@@ -686,16 +1001,23 @@ export default function Employee() {
             {/* Evening Update Box */}
             <div className="mt-5">
               <div className="flex items-center justify-between">
-                <label htmlFor="evening-text" className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                <label
+                  htmlFor="evening-text"
+                  className="text-xs font-semibold text-slate-700 uppercase tracking-wider"
+                >
                   Evening Update
                 </label>
                 <span className="text-xs text-slate-400">{e.length} / 2000</span>
               </div>
               <textarea
                 id="evening-text"
-                disabled={!eveningOpen}
+                disabled={!eveningOpen && !data.allowCurrentWeekUpdates}
                 className={boxClass}
-                placeholder={eveningOpen ? 'What did you finish today?' : 'Evening updates open 1:00 PM to 11:55 PM.'}
+                placeholder={
+                  eveningOpen || data.allowCurrentWeekUpdates
+                    ? 'What did you finish today?'
+                    : 'Evening updates open 1:00 PM to 11:55 PM.'
+                }
                 value={e}
                 maxLength={2000}
                 onChange={(e) => setE(e.target.value)}
@@ -703,10 +1025,12 @@ export default function Employee() {
               <div className="mt-2 flex justify-end">
                 <button
                   onClick={handleSaveEvening}
-                  disabled={!eveningOpen || busyE || !e.trim()}
-                  className="rounded bg-brand px-4 py-1.5 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+                  disabled={
+                    (!eveningOpen && !data.allowCurrentWeekUpdates) || busyE || !e.trim()
+                  }
+                  className="rounded bg-brand px-4 py-1.5 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-50 cursor-pointer"
                 >
-                  {busyE ? 'Saving…' : 'Save evening update'}
+                  {busyE ? 'Saving…' : data.evening ? 'Update evening update' : 'Save evening update'}
                 </button>
               </div>
             </div>
@@ -719,12 +1043,14 @@ export default function Employee() {
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
           <div>
             <h2 className="text-xl font-bold text-ink">My History</h2>
-            <p className="text-xs text-slate-500">View and download your previous work logs and attendance records.</p>
+            <p className="text-xs text-slate-500">
+              View and download your previous work logs and attendance records.
+            </p>
           </div>
           <button
             onClick={handleDownloadMyHistory}
             disabled={downloadingHist}
-            className="rounded bg-brand px-4 py-2 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60 transition-colors"
+            className="rounded bg-brand px-4 py-2 text-xs font-medium text-white hover:bg-brand-dark disabled:opacity-60 transition-colors cursor-pointer"
           >
             {downloadingHist ? 'Downloading…' : 'Download my Excel'}
           </button>
@@ -801,47 +1127,77 @@ export default function Employee() {
             <tbody>
               {histLoading ? (
                 <tr>
-                  <td colSpan={10} className="p-6 text-center text-slate-500">
+                  <td
+                    colSpan={10}
+                    className="p-6 text-center text-slate-500"
+                  >
                     Loading your history…
                   </td>
                 </tr>
               ) : history.rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-6 text-center text-slate-500">
+                  <td
+                    colSpan={10}
+                    className="p-6 text-center text-slate-500"
+                  >
                     No history records found.
                   </td>
                 </tr>
               ) : (
-                history.rows.map((r, idx) => (
-                  <tr key={`${r.date}-${idx}`} className="border-b border-line align-top last:border-0 hover:bg-slate-50">
-                    <td className="whitespace-nowrap p-2.5 font-mono">{shortDate(r.date) || '-'}</td>
-                    <td className="whitespace-nowrap p-2.5 font-medium text-slate-700">{r.checkIn || '-'}</td>
-                    <td className="whitespace-nowrap p-2.5 font-medium text-slate-700">{r.checkOut || '-'}</td>
-                    <td className="whitespace-nowrap p-2.5 text-brand font-semibold">{r.hoursWorked || '-'}</td>
-                    <td className="max-w-xs whitespace-pre-wrap p-2.5 text-slate-600">{r.morning || '-'}</td>
-                    <td className="max-w-xs whitespace-pre-wrap p-2.5 text-slate-600">{r.evening || '-'}</td>
-                    <td className="max-w-xs whitespace-pre-wrap p-2.5 text-slate-600 font-medium">
-                      {r.weeklyWork || '-'}
-                    </td>
-                    <td className="whitespace-nowrap p-2.5">
-                      {r.weeklyTargetStatus ? (
-                        <span className={`rounded px-2 py-0.5 text-xs font-semibold ${targetStatusChip[r.weeklyTargetStatus] || 'bg-slate-100 text-slate-800'}`}>
-                          {r.weeklyTargetStatus}
+                history.rows.map((r, idx) => {
+                  return (
+                    <tr
+                      key={`${r.date}-${idx}`}
+                      className="border-b border-line align-top last:border-0 hover:bg-slate-50"
+                    >
+                      <td className="whitespace-nowrap p-2.5 font-mono">{shortDate(r.date) || '-'}</td>
+                      <td className="whitespace-nowrap p-2.5 font-medium text-slate-700">
+                        {r.checkIn || '-'}
+                      </td>
+                      <td className="whitespace-nowrap p-2.5 font-medium text-slate-700">
+                        {r.checkOut || '-'}
+                      </td>
+                      <td className="whitespace-nowrap p-2.5 text-brand font-semibold">
+                        {r.hoursWorked || '-'}
+                      </td>
+                      <td className="max-w-xs whitespace-pre-wrap p-2.5 text-slate-600">
+                        {r.morning || '-'}
+                      </td>
+                      <td className="max-w-xs whitespace-pre-wrap p-2.5 text-slate-600">
+                        {r.evening || '-'}
+                      </td>
+                      <td className="max-w-xs whitespace-pre-wrap p-2.5 text-slate-600 font-medium">
+                        {r.weeklyWork || '-'}
+                      </td>
+                      <td className="whitespace-nowrap p-2.5">
+                        {r.weeklyTargetStatus ? (
+                          <span
+                            className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                              targetStatusChip[r.weeklyTargetStatus] ||
+                              'bg-slate-100 text-slate-800'
+                            }`}
+                          >
+                            {r.weeklyTargetStatus}
+                          </span>
+                        ) : (
+                          '-'
+                        )}
+                      </td>
+                      <td className="max-w-xs whitespace-pre-wrap p-2.5 text-slate-600 italic">
+                        {r.weeklyTargetReason || <span className="not-italic">-</span>}
+                      </td>
+                      <td className="p-2.5">
+                        <span
+                          className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                            chip[r.status] || 'bg-slate-100 text-slate-800'
+                          }`}
+                        >
+                          {r.status || '-'}
                         </span>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                    <td className="max-w-xs whitespace-pre-wrap p-2.5 text-slate-600 italic">
-                      {r.weeklyTargetReason || <span className="not-italic">-</span>}
-                    </td>
-                    <td className="p-2.5">
-                      <span className={`rounded px-2 py-0.5 text-xs font-semibold ${chip[r.status] || 'bg-slate-100 text-slate-800'}`}>
-                        {r.status || '-'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

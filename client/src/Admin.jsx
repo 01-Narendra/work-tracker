@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, downloadExcel, getCurrentWeekRange, shortDate } from './api.js';
+import { api, downloadExcel, getCurrentWeekRange, shortDate, toggleCurrentWeekUpdates } from './api.js';
 import { useToast } from './Toast.jsx';
 
 const chip = {
@@ -27,6 +27,8 @@ export default function Admin({ userRole }) {
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [allowCurrentWeekUpdates, setAllowCurrentWeekUpdates] = useState(false);
+  const [busyToggle, setBusyToggle] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -37,6 +39,9 @@ export default function Admin({ userRole }) {
     api(url)
       .then((d) => {
         setData(d);
+        if (d.allowCurrentWeekUpdates !== undefined) {
+          setAllowCurrentWeekUpdates(Boolean(d.allowCurrentWeekUpdates));
+        }
         setErr('');
       })
       .catch((ex) => setErr(ex.message))
@@ -46,6 +51,21 @@ export default function Admin({ userRole }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleToggleCurrentWeek = async () => {
+    const nextVal = !allowCurrentWeekUpdates;
+    setBusyToggle(true);
+    try {
+      const res = await toggleCurrentWeekUpdates(nextVal);
+      setAllowCurrentWeekUpdates(Boolean(res.allowCurrentWeekUpdates));
+      toast.success(res.message);
+      load();
+    } catch (ex) {
+      toast.error(ex.message || 'Failed to toggle current week updates.');
+    } finally {
+      setBusyToggle(false);
+    }
+  };
 
   const handleRefresh = () => {
     setLoading(true);
@@ -103,7 +123,37 @@ export default function Admin({ userRole }) {
               : 'Viewing team updates (restricted users are hidden).'}
           </p>
         </div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {userRole === 'superadmin' && (
+            <button
+              type="button"
+              onClick={handleToggleCurrentWeek}
+              disabled={busyToggle}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold shadow-xs transition-colors cursor-pointer ${
+                allowCurrentWeekUpdates
+                  ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  : 'border-line bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+              title={
+                allowCurrentWeekUpdates
+                  ? 'Current week updates are enabled. Click to disable strict mode.'
+                  : 'Current week updates are disabled. Click to enable grace mode.'
+              }
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  allowCurrentWeekUpdates ? 'bg-amber-500 animate-pulse' : 'bg-slate-400'
+                }`}
+              ></span>
+              <span>
+                Current Week Updates:{' '}
+                <strong className={allowCurrentWeekUpdates ? 'text-amber-900' : 'text-slate-600'}>
+                  {allowCurrentWeekUpdates ? 'ENABLED' : 'DISABLED'}
+                </strong>
+              </span>
+            </button>
+          )}
+
           <button
             onClick={handleRefresh}
             disabled={loading}
