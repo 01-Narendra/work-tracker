@@ -6,6 +6,7 @@ import {
   checkIn,
   checkOut,
   updateText,
+  updateDay,
   getMyHistory,
   downloadMyExcel,
 } from '../controllers/employeeController.js';
@@ -23,6 +24,7 @@ router.post('/weekly-target-status', auth(updateRoles), asyncHandler(submitWeekl
 router.post('/check-in', auth(updateRoles), asyncHandler(checkIn));
 router.post('/check-out', auth(updateRoles), asyncHandler(checkOut));
 router.post('/update', auth(updateRoles), asyncHandler(updateText));
+router.post('/update-day', auth(updateRoles), asyncHandler(updateDay));
 router.get('/my-history', auth(updateRoles), asyncHandler(getMyHistory));
 router.get('/my-download', auth(updateRoles), asyncHandler(downloadMyExcel));
 

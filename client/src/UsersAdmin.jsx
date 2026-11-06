@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, shortDate } from './api.js';
+import { api, getSystemSettings, toggleCurrentWeekUpdates, shortDate } from './api.js';
 import { useToast } from './Toast.jsx';
 
 export default function UsersAdmin() {
@@ -10,6 +10,10 @@ export default function UsersAdmin() {
   const [err, setErr] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // Current week updates toggle state
+  const [allowCurrentWeekUpdates, setAllowCurrentWeekUpdates] = useState(false);
+  const [busyToggle, setBusyToggle] = useState(false);
+
   // New user form state
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
@@ -17,6 +21,14 @@ export default function UsersAdmin() {
   const [selectedAdmins, setSelectedAdmins] = useState([]);
   const [busyAdd, setBusyAdd] = useState(false);
   const [addErr, setAddErr] = useState('');
+
+  const loadSettings = useCallback(() => {
+    getSystemSettings()
+      .then((d) => {
+        setAllowCurrentWeekUpdates(Boolean(d.allowCurrentWeekUpdates));
+      })
+      .catch((ex) => console.error('Failed to load system settings:', ex));
+  }, []);
 
   const loadUsers = useCallback(() => {
     setLoading(true);
@@ -32,7 +44,22 @@ export default function UsersAdmin() {
 
   useEffect(() => {
     loadUsers();
-  }, [loadUsers]);
+    loadSettings();
+  }, [loadUsers, loadSettings]);
+
+  async function handleToggleCurrentWeek() {
+    const nextVal = !allowCurrentWeekUpdates;
+    setBusyToggle(true);
+    try {
+      const res = await toggleCurrentWeekUpdates(nextVal);
+      setAllowCurrentWeekUpdates(Boolean(res.allowCurrentWeekUpdates));
+      toast.success(res.message);
+    } catch (ex) {
+      toast.error(ex.message || 'Failed to update setting.');
+    } finally {
+      setBusyToggle(false);
+    }
+  }
 
   async function handleResetPassword(u) {
     if (!window.confirm(`Reset password for "${u.name}" (${u.username}) to the default "sci12345"?`)) {
@@ -181,6 +208,81 @@ export default function UsersAdmin() {
           {err}
         </div>
       )}
+
+      {/* SYSTEM CONTROLS: Current Week Updates Window */}
+      <div className="rounded-xl border border-line bg-white p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-base font-bold text-ink">Current Week Updates Window</h2>
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                  allowCurrentWeekUpdates
+                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                    : 'bg-slate-100 text-slate-700 border border-slate-200'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    allowCurrentWeekUpdates ? 'bg-amber-500 animate-pulse' : 'bg-slate-400'
+                  }`}
+                ></span>
+                {allowCurrentWeekUpdates ? 'Enabled (Grace Mode Active)' : 'Disabled (Strict Windows)'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 max-w-2xl leading-relaxed">
+              {allowCurrentWeekUpdates ? (
+                <span className="text-amber-900 font-medium">
+                  Enabled: Employees and Admins can now add or update their check-in, check-out, and updates for any day of the current week, even outside standard morning (9 AM–1 PM) and evening (1 PM–11:55 PM) windows.
+                </span>
+              ) : (
+                <span>
+                  Strict Mode: Users cannot add or update their check-in, check-out, or updates outside the morning (9 AM–1 PM) and evening (1 PM–11:55 PM) windows of the current day.
+                </span>
+              )}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleToggleCurrentWeek}
+            disabled={busyToggle}
+            className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
+              allowCurrentWeekUpdates
+                ? 'bg-red-50 text-red-700 border border-red-300 hover:bg-red-100'
+                : 'bg-brand text-white hover:bg-brand-dark'
+            } disabled:opacity-60`}
+          >
+            {busyToggle ? (
+              <span>Updating…</span>
+            ) : allowCurrentWeekUpdates ? (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                  />
+                </svg>
+                <span>Disable Current Week Updates</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"
+                  />
+                </svg>
+                <span>Enable Current Week Updates</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
 
       {/* Users Table */}
       <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-xs">
